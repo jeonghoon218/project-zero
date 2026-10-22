@@ -1,11 +1,3 @@
-
-<div id="codePanel" hidden>
-  <input
-    id="code"
-    maxlength="3"
-    placeholder="3자리 암호"
-  >
-  <button id="submit">
-    암호 확인
-  </button>
-</div>
+<!doctype html><html lang="ko"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"><title>PROJECT ZERO</title><style>
+*{box-sizing:border-box}body{margin:0;background:#10131d;color:#edf2ff;font-family:system-ui,sans-serif;overflow:hidden}canvas{display:block}#ui{position:fixed;top:16px;left:16px;max-width:370px;padding:16px;background:#0d1020df;border:1px solid #566780;border-radius:14px;line-height:1.5}#ui h2{margin:0 0 8px}#info{font-size:14px}#notice{margin-top:10px;color:#9eeecf;font-weight:bold}button,input{font:inherit}button{background:#445bd9;color:white;border:0;border-radius:8px;padding:8px 12px;cursor:pointer}input{background:#192238;color:white;border:1px solid #64718f;border-radius:6px;padding:7px;width:100px}#controls{position:fixed;bottom:18px;left:18px;background:#0d1020cb;padding:10px;border-radius:8px;font-size:13px}#actions{position:fixed;right:20px;bottom:20px}#actions button{font-size:18px;padding:14px 20px}#codePanel{margin-top:10px}#codePanel[hidden],#exit[hidden]{display:none}
+</style></head><body><div id="ui"><h2>PROJECT ZERO</h2><div id="info">서버에 연결 중...</div><div id="notice"></div><div id="codePanel" hidden><input id="code" maxlength="3" inputmode="numeric" placeholder="3자리 암호"><button id="submit">해제</button></div><button id="exit" hidden>대기실로</button></div><div id="controls">W A S D / 방향키 : 이동 · E : 주변 장치 작동<br>초록 발판에 3명이 모이면 시작 · 퍼즐 1은 각자 하나의 스위치!</div><div id="actions"><button id="interact">E 상호작용</button></div><script src="/socket.io/socket.io.js"></script><script type="module" src="/main.js"></script></body></html>
