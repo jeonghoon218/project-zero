@@ -23,7 +23,7 @@ function leaveGame(id) {
   const p=players.get(id); if (!p || !p.gameId) return;
   const gid=p.gameId, game=games.get(gid);
   io.sockets.sockets.get(id)?.leave(gid);
-  p.gameId=null; p.x=0; p.z=5; p.onPad=false;
+  p.gameId=null; p.x=0; p.z=5; p.y=0; p.onPad=false;
   io.to(id).emit('returnLobby');
   if(game){game.members=game.members.filter(member=>member!==id); if(!game.members.length)games.delete(gid); else io.to(gid).emit('notice','팀원이 퇴장했습니다.');}
 }
@@ -32,20 +32,20 @@ function matchmaking(){
   while (eligible.length>=3){
     const selected=eligible.splice(0,3), gid=`team-${++gameCounter}`;
     const game={members:selected,stage:1,switches:new Map(),unlocked:false}; games.set(gid,game);
-    selected.forEach((id,i)=>{const p=players.get(id);p.gameId=gid;p.onPad=false;p.x=(i-1)*2;p.z=5;io.sockets.sockets.get(id)?.join(gid);io.to(id).emit('enterGame',{gameId:gid,role:i});});
+    selected.forEach((id,i)=>{const p=players.get(id);p.gameId=gid;p.onPad=false;p.x=(i-1)*2;p.z=5;p.y=0;io.sockets.sockets.get(id)?.join(gid);io.to(id).emit('enterGame',{gameId:gid,role:i});});
     synchronize(gid);
   }
   publishLobby();
 }
 io.on('connection',socket=>{
-  players.set(socket.id,{x:0,z:5,onPad:false,gameId:null});
+  players.set(socket.id,{x:0,z:5,y:0,onPad:false,gameId:null});
   socket.emit('welcome',{id:socket.id});
   socket.on('move',v=>{
     const p=players.get(socket.id);
     if(!p || !v || !Number.isFinite(v.x)||!Number.isFinite(v.z))return;
     const nx=clamp(v.x,-10,10),nz=clamp(v.z,-9,9);
     if(Math.hypot(nx-p.x,nz-p.z)>1.5)return;
-    p.x=nx;p.z=nz;
+    p.x=nx;p.z=nz;p.y=Number.isFinite(v.y)?clamp(v.y,0,2):0;
     if(!p.gameId){p.onPad=Math.abs(nx)<2 && Math.abs(nz)<2;matchmaking();}
   });
   socket.on('switch',index=>{
@@ -73,7 +73,7 @@ io.on('connection',socket=>{
 });
 setInterval(()=>{
   const rooms=new Map();
-  for(const [id,p] of players){const key=p.gameId||'lobby';if(!rooms.has(key))rooms.set(key,[]);rooms.get(key).push({id,x:p.x,z:p.z,onPad:p.onPad});}
+  for(const [id,p] of players){const key=p.gameId||'lobby';if(!rooms.has(key))rooms.set(key,[]);rooms.get(key).push({id,x:p.x,z:p.z,y:p.y,onPad:p.onPad});}
   for(const [room,data] of rooms){if(room==='lobby')io.emit('positions',{room,players:data});else io.to(room).emit('positions',{room,players:data});}
 },100);
 const port=Number(process.env.PORT)||3000;
