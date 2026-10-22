@@ -6,7 +6,7 @@ let myId=null,gameId=null,role=0,stage=0,padCount=0,state={relay:0,dials:[-1,-1,
 const keys=new Set(),self={x:0,z:5},avatars=new Map();
 const scene=new THREE.Scene();scene.background=new THREE.Color(0x101b29);
 const camera=new THREE.PerspectiveCamera(65,innerWidth/innerHeight,.1,120);
-const renderer=new THREE.WebGLRenderer({antialias:true});renderer.setPixelRatio(Math.min(devicePixelRatio,2));renderer.setSize(innerWidth,innerHeight);renderer.outputColorSpace=THREE.SRGBColorSpace;document.body.appendChild(renderer.domElement);
+const renderer=new THREE.WebGLRenderer({antialias:true});renderer.setPixelRatio(Math.min(devicePixelRatio,matchMedia('(pointer: coarse)').matches?1.5:2));renderer.setSize(innerWidth,innerHeight);renderer.outputColorSpace=THREE.SRGBColorSpace;document.body.appendChild(renderer.domElement);
 scene.add(new THREE.HemisphereLight(0xaaccf5,0x293144,2.1));const sun=new THREE.DirectionalLight(0xfff3de,2.2);sun.position.set(4,10,5);scene.add(sun);
 const world=new THREE.Group();scene.add(world);
 const mat=(color,emissive=0x000000)=>new THREE.MeshStandardMaterial({color,emissive,roughness:.66});
@@ -66,6 +66,43 @@ function renderUI(){
 function clearAvatars(){for(const a of avatars.values())scene.remove(a);avatars.clear();}
 function use(){if(gameId && stage!==5&&stage!==6)socket.emit('action');else ui.notice.textContent=stage===5?'녹색 발판에 서서 3초간 버티세요.':'자기 콘솔로 이동하세요.';}
 el('interact').onclick=use;
+// Touch devices (phones / tablets) get Roblox-style left thumbstick.
+// Mouse/keyboard users retain the original PC controls.
+const mobileMode=window.matchMedia('(pointer: coarse)').matches;
+const joystick={x:0,y:0};
+if(mobileMode){
+ document.body.classList.add('touch-ui');
+ const hud=el('ui'),toggle=el('hudToggle');
+ hud.classList.add('collapsed');
+ toggle.addEventListener('click',()=>{
+   const collapsed=hud.classList.toggle('collapsed');
+   toggle.textContent=collapsed?'자세히 보기':'축소하기';
+   toggle.setAttribute('aria-expanded',String(!collapsed));
+ });
+ const zone=el('joystickArea'),thumb=el('joystickThumb');
+ let activePointer=null;
+ const radius=44;
+ function setJoy(e){
+   const rect=zone.getBoundingClientRect();
+   const dx=e.clientX-(rect.left+rect.width/2),dy=e.clientY-(rect.top+rect.height/2);
+   const length=Math.hypot(dx,dy),factor=length>radius?radius/length:1;
+   const x=dx*factor,y=dy*factor;
+   joystick.x=x/radius;joystick.y=y/radius;
+   thumb.style.transform=`translate(${x}px,${y}px)`;
+ }
+ function releaseJoy(e){if(e.pointerId!==activePointer)return;activePointer=null;joystick.x=0;joystick.y=0;thumb.style.transform='translate(0px,0px)';}
+ zone.addEventListener('pointerdown',e=>{
+   if(activePointer!==null)return;
+   e.preventDefault();activePointer=e.pointerId;zone.setPointerCapture(e.pointerId);setJoy(e);
+ });
+ zone.addEventListener('pointermove',e=>{if(e.pointerId===activePointer){e.preventDefault();setJoy(e);}});
+ for(const event of ['pointerup','pointercancel','lostpointercapture'])zone.addEventListener(event,releaseJoy);
+ const jumpBtn=el('mobileJump'),useBtn=el('mobileInteract');
+ jumpBtn.addEventListener('pointerdown',e=>{e.preventDefault();if(height===0&&velocity===0)velocity=JUMP;});
+ useBtn.addEventListener('pointerdown',e=>{e.preventDefault();use();});
+ window.addEventListener('blur',()=>{joystick.x=joystick.y=0;thumb.style.transform='translate(0px,0px)';});
+}
+
 el('submit').onclick=()=>socket.emit('code',ui.code.value);
 ui.code.addEventListener('keydown',e=>{e.stopPropagation();if(e.key==='Enter')el('submit').click();});
 ui.exit.onclick=()=>{socket.emit('exit');};
@@ -90,6 +127,7 @@ socket.on('positions',d=>{
 });
 function frame(now){requestAnimationFrame(frame);const dt=Math.min((now-last)/1000,.05);last=now;
  let dx=0,dz=0;if(keys.has('w')||keys.has('arrowup'))dz--;if(keys.has('s')||keys.has('arrowdown'))dz++;if(keys.has('a')||keys.has('arrowleft'))dx--;if(keys.has('d')||keys.has('arrowright'))dx++;
+ dx+=joystick.x;dz+=joystick.y;
  const n=Math.hypot(dx,dz)||1;self.x=THREE.MathUtils.clamp(self.x+dx/n*SPEED*dt,-9.5,9.5);self.z=THREE.MathUtils.clamp(self.z+dz/n*SPEED*dt,-8.4,8.4);
  if(velocity!==0||height>0){height+=velocity*dt;velocity-=GRAVITY*dt;if(height<=0){height=0;velocity=0;}}
  myself.position.set(self.x,height,self.z);if(dx||dz)myself.rotation.y=Math.atan2(-dx,-dz);
