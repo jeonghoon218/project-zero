@@ -1,7 +1,7 @@
 import * as THREE from '/vendor/three/three.module.js';
 const socket=io();
 const el=id=>document.getElementById(id);
-const ui={chapter:el('chapter'),story:el('story'),info:el('info'),clue:el('clue'),timer:el('timer'),status:el('status'),notice:el('notice'),panel:el('codePanel'),code:el('code'),exit:el('exit')};
+const ui={chapter:el('chapter'),story:el('story'),info:el('info'),clue:el('clue'),timer:el('timer'),status:el('status'),notice:el('notice'),panel:el('codePanel'),code:el('code')};
 let myId=null,gameId=null,role=0,stage=0,padCount=0,state={relay:0,dials:[-1,-1,-1],cooling:[-1,-1,-1],hold:0};
 const keys=new Set(),self={x:0,z:5},avatars=new Map();
 const scene=new THREE.Scene();scene.background=new THREE.Color(0x101b29);
@@ -56,15 +56,15 @@ const plots=[
  {chapter:'탈출 성공 — ZERO 봉쇄 해제',story:'“격리 프로토콜 종료. 세 명의 공동 인증이 완료되었습니다.” 멀리 초록색 탈출 발판이 켜진다.',objective:'방 끝의 초록색 판 위로 걸어가면 3명 모두 대기실로 돌아간다.',clues:['앞쪽 출구(z=-7)의 초록색 발판으로 이동!','발판을 한 사람만 밟아도 팀 전체가 돌아간다.','임무 완료. 연구소는 다시 잠들었다.']}
 ];
 function renderUI(){
- if(!gameId){ui.chapter.textContent='대기 구역 / TEAM FORMATION';ui.story.textContent='초록 발판 위에 세 명이 모이면 임무가 시작됩니다. 준비되면 같은 발판 위에 서세요.';ui.info.textContent=`발판 대기 인원 ${padCount}/3`;ui.clue.textContent='이동: WASD · 점프: Space · 상호작용: E';ui.timer.textContent='';ui.status.textContent='';ui.panel.hidden=true;ui.exit.hidden=true;return;}
+ if(!gameId){ui.chapter.textContent='대기 구역 / TEAM FORMATION';ui.story.textContent='초록 발판 위에 세 명이 모이면 임무가 시작됩니다. 준비되면 같은 발판 위에 서세요.';ui.info.textContent=`발판 대기 인원 ${padCount}/3`;ui.clue.textContent='이동: WASD · 점프: Space · 상호작용: E';ui.timer.textContent='';ui.status.textContent='';ui.panel.hidden=true;el('emergencyExit').hidden=true;return;}
  const p=plots[stage];ui.chapter.textContent=p.chapter;ui.story.textContent=p.story;ui.info.textContent=p.objective;ui.clue.textContent=`나만 보는 단서 · ${'ABC'[role]}\n${p.clues[role]}`;
  ui.panel.hidden=stage!==2||Math.hypot(self.x,self.z+5)>2.5;
- ui.exit.hidden=false;
+ el('emergencyExit').hidden=false;
  ui.status.textContent=stage===0||stage===3?`순서 진행 ${state.relay}/3`:stage===1?`변압 눈금 A/B/C: ${state.dials.map(n=>n<0?'미조작':n).join(' / ')}`:stage===4?`냉각 눈금 A/B/C: ${state.cooling.map(n=>n<0?'미조작':n).join(' / ')}`:stage===5?`동시 인증 ${Math.floor(state.hold*10)/10}/3초`:stage===6?'초록색 출구가 열렸습니다.':'';
  ui.timer.textContent=stage===6?'출구로 이동하세요.':'연구소 전체: 6개 협동 보안장치';
 }
 function clearAvatars(){for(const a of avatars.values())scene.remove(a);avatars.clear();}
-function use(){if(gameId && stage!==5&&stage!==6)socket.emit('action');else ui.notice.textContent=stage===5?'녹색 발판에 서서 3초간 버티세요.':'자기 콘솔로 이동하세요.';}
+function use(){if(paused)return;if(pcMode && gameId && stage===2 && Math.hypot(self.x,self.z+5)<=2.5){openCodeInput();return;}if(gameId && stage!==5&&stage!==6)socket.emit('action');else ui.notice.textContent=stage===5?'녹색 발판에 서서 3초간 버티세요.':'자기 콘솔로 이동하세요.';}
 el('interact').onclick=use;
 // Touch devices (phones / tablets) get Roblox-style left thumbstick.
 // Mouse/keyboard users retain the original PC controls.
@@ -92,49 +92,137 @@ if(mobileMode){
  }
  function releaseJoy(e){if(e.pointerId!==activePointer)return;activePointer=null;joystick.x=0;joystick.y=0;thumb.style.transform='translate(0px,0px)';}
  zone.addEventListener('pointerdown',e=>{
-   if(activePointer!==null)return;
+   if(paused||activePointer!==null)return;
    e.preventDefault();activePointer=e.pointerId;zone.setPointerCapture(e.pointerId);setJoy(e);
  });
  zone.addEventListener('pointermove',e=>{if(e.pointerId===activePointer){e.preventDefault();setJoy(e);}});
  for(const event of ['pointerup','pointercancel','lostpointercapture'])zone.addEventListener(event,releaseJoy);
  const jumpBtn=el('mobileJump'),useBtn=el('mobileInteract');
- jumpBtn.addEventListener('pointerdown',e=>{e.preventDefault();if(height===0&&velocity===0)velocity=JUMP;});
- useBtn.addEventListener('pointerdown',e=>{e.preventDefault();use();});
+ jumpBtn.addEventListener('pointerdown',e=>{e.preventDefault();if(!paused&&height===0&&velocity===0)velocity=JUMP;});
+ useBtn.addEventListener('pointerdown',e=>{e.preventDefault();if(!paused)use();});
  window.addEventListener('blur',()=>{joystick.x=joystick.y=0;thumb.style.transform='translate(0px,0px)';});
 }
 
-el('submit').onclick=()=>socket.emit('code',ui.code.value);
+// Mouse camera and ESC pause state. Pointer Lock is only requested from a real click.
+const pauseOverlay=el('pauseOverlay'),mouseTip=el('mouseTip');
+const yawPitch={yaw:0,pitch:0};
+let paused=false,hasPlayed=false,codeMode=false;
+const pcMode=!mobileMode;
+function setPaused(value){
+ paused=value;document.body.classList.toggle('paused',value);
+ pauseOverlay.hidden=!value;
+ keys.clear();joystick.x=0;joystick.y=0;
+ if(mobileMode){el('joystickThumb').style.transform='translate(0px,0px)';}
+ mouseTip.hidden=!pcMode||value||document.pointerLockElement===renderer.domElement;
+}
+function unlock(){if(document.pointerLockElement===renderer.domElement)document.exitPointerLock();}
+function pauseGame(){codeMode=false;setPaused(true);unlock();}
+function openCodeInput(){
+ codeMode=true;unlock();ui.panel.hidden=false;ui.code.focus();
+ ui.notice.textContent='암호를 입력하고 인증을 누르면 게임 시점으로 돌아갑니다.';
+}
+function lockMouse(){
+ if(!pcMode||paused||document.pointerLockElement===renderer.domElement)return;
+ // Permission is provided by the player's click or resume action.
+ try{const result=renderer.domElement.requestPointerLock();if(result?.catch)result.catch(()=>{if(!paused)mouseTip.hidden=false;});}
+ catch{mouseTip.hidden=false;}
+}
+if(pcMode){
+ renderer.domElement.addEventListener('click',()=>{if(!paused)lockMouse();});
+ document.addEventListener('mousemove',e=>{
+  if(paused||document.pointerLockElement!==renderer.domElement)return;
+  const sensitivity=.0023;
+  yawPitch.yaw-=e.movementX*sensitivity;
+  yawPitch.pitch=THREE.MathUtils.clamp(yawPitch.pitch-e.movementY*sensitivity,-.85,.85);
+ });
+ document.addEventListener('pointerlockchange',()=>{
+  const locked=document.pointerLockElement===renderer.domElement;
+  if(locked){hasPlayed=true;mouseTip.hidden=true;}
+  else if(!paused&&hasPlayed&&!codeMode) setPaused(true); // ESC and involuntary unlock
+  else if(!paused)mouseTip.hidden=false;
+ });
+ document.addEventListener('pointerlockerror',()=>{if(!paused)mouseTip.hidden=false;});
+}
+el('resumeBtn').addEventListener('click',()=>{
+ setPaused(false);
+ if(pcMode)lockMouse();
+});
+el('emergencyExit').addEventListener('click',()=>{
+ if(gameId)socket.emit('exit');
+ setPaused(false);
+ if(pcMode)lockMouse();
+});
+el('pauseMobile').addEventListener('click',pauseGame);
+el('submit').onclick=()=>{socket.emit('code',ui.code.value);if(codeMode){codeMode=false;ui.code.blur();lockMouse();}};
 ui.code.addEventListener('keydown',e=>{e.stopPropagation();if(e.key==='Enter')el('submit').click();});
-ui.exit.onclick=()=>{socket.emit('exit');};
 window.addEventListener('keydown',e=>{
- if(e.target instanceof HTMLInputElement)return;
+ if(e.key==='Escape'){
+  e.preventDefault();
+  if(!paused)pauseGame();
+  // ESC intentionally cannot resume: resume requires direct click to re-lock mouse
+  return;
+ }
+ if(paused||codeMode||e.target instanceof HTMLInputElement)return;
  if(['Space','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.code))e.preventDefault();
  if(e.code==='Space'){if(!e.repeat && height===0 && velocity===0)velocity=JUMP;return;}
  keys.add(e.key.toLowerCase());if(e.key.toLowerCase()==='e'&&!e.repeat)use();
 });
 window.addEventListener('keyup',e=>{keys.delete(e.key.toLowerCase());});
+window.addEventListener('blur',()=>{keys.clear();if(pcMode&&document.pointerLockElement===renderer.domElement)pauseGame();});
 socket.on('welcome',d=>{myId=d.id;renderUI();});
 socket.on('lobbyCount',n=>{padCount=n;if(!gameId)renderUI();});
 socket.on('enterGame',d=>{gameId=d.gameId;role=d.role;stage=d.stage;Object.assign(self,{x:(role-1)*2,z:5});resetMovement();clearAvatars();myself.children[0].material.color.setHex(roleColors[role]);makeWorld();renderUI();ui.notice.textContent='임무 시작! 각자 서로 다른 단서를 친구들에게 설명하세요.';});
 socket.on('teleport',p=>{self.x=p.x;self.z=p.z;resetMovement();});
 socket.on('returnLobby',()=>{gameId=null;role=0;stage=0;Object.assign(self,{x:0,z:5});resetMovement();clearAvatars();makeWorld();renderUI();ui.notice.textContent='팀이 대기실로 귀환했습니다.';});
-socket.on('puzzleState',d=>{const changed=stage!==d.stage;stage=d.stage;state=d;if(changed)makeWorld();else if(stage===1||stage===4)makeWorld();renderUI();});
+socket.on('puzzleState',d=>{const changed=stage!==d.stage;if(changed&&codeMode){codeMode=false;ui.code.blur();}stage=d.stage;state=d;if(changed)makeWorld();else if(stage===1||stage===4)makeWorld();renderUI();});
 socket.on('notice',m=>{ui.notice.textContent=m;});
 socket.on('positions',d=>{
  if((gameId||'lobby')!==d.room)return;const active=new Set();
  for(const p of d.players){if(p.id===myId)continue;active.add(p.id);let a=avatars.get(p.id);if(!a){a=makeHuman(roleColors[p.role]??0xdea668);avatars.set(p.id,a);scene.add(a);}a.position.set(p.x,p.y||0,p.z);}
  for(const [id,a] of avatars)if(!active.has(id)){scene.remove(a);avatars.delete(id);}
 });
-function frame(now){requestAnimationFrame(frame);const dt=Math.min((now-last)/1000,.05);last=now;
- let dx=0,dz=0;if(keys.has('w')||keys.has('arrowup'))dz--;if(keys.has('s')||keys.has('arrowdown'))dz++;if(keys.has('a')||keys.has('arrowleft'))dx--;if(keys.has('d')||keys.has('arrowright'))dx++;
- dx+=joystick.x;dz+=joystick.y;
- const n=Math.hypot(dx,dz)||1;self.x=THREE.MathUtils.clamp(self.x+dx/n*SPEED*dt,-9.5,9.5);self.z=THREE.MathUtils.clamp(self.z+dz/n*SPEED*dt,-8.4,8.4);
- if(velocity!==0||height>0){height+=velocity*dt;velocity-=GRAVITY*dt;if(height<=0){height=0;velocity=0;}}
- myself.position.set(self.x,height,self.z);if(dx||dz)myself.rotation.y=Math.atan2(-dx,-dz);
- const target=new THREE.Vector3(self.x,7.3,self.z+9);camera.position.lerp(target,Math.min(1,dt*9));camera.lookAt(self.x,1.15,self.z-2);
+const cameraTarget=new THREE.Vector3();
+function frame(now){
+ requestAnimationFrame(frame);
+ const dt=Math.min((now-last)/1000,.05);last=now;
+ let dx=0,dz=0;
+ if(!paused){
+  if(keys.has('w')||keys.has('arrowup'))dz--;
+  if(keys.has('s')||keys.has('arrowdown'))dz++;
+  if(keys.has('a')||keys.has('arrowleft'))dx--;
+  if(keys.has('d')||keys.has('arrowright'))dx++;
+  dx+=joystick.x;dz+=joystick.y;
+ }
+ const mag=Math.hypot(dx,dz);
+ let mx=0,mz=0;
+ if(mag){
+  const sideways=dx/mag,forward=dz/mag;
+  if(pcMode){ // move relative to the direction the camera is facing
+   mx=sideways*Math.cos(yawPitch.yaw)+forward*Math.sin(yawPitch.yaw);
+   mz=-sideways*Math.sin(yawPitch.yaw)+forward*Math.cos(yawPitch.yaw);
+  }else{mx=sideways;mz=forward;}
+  self.x=THREE.MathUtils.clamp(self.x+mx*SPEED*dt,-9.5,9.5);
+  self.z=THREE.MathUtils.clamp(self.z+mz*SPEED*dt,-8.4,8.4);
+ }
+ if(!paused&&(velocity!==0||height>0)){
+  height+=velocity*dt;velocity-=GRAVITY*dt;
+  if(height<=0){height=0;velocity=0;}
+ }
+ myself.position.set(self.x,height,self.z);
+ if(mag){const rotation=Math.atan2(-mx,-mz);const delta=Math.atan2(Math.sin(rotation-myself.rotation.y),Math.cos(rotation-myself.rotation.y));
+  myself.rotation.y+=delta*Math.min(1,dt*13);
+ }
+ // Camera orbits the avatar. Yaw/pitch come from the pointer-locked mouse.
+ // For PE, yaw and pitch remain at zero, preserving the established third-person view.
+ const cy=Math.cos(yawPitch.yaw),sy=Math.sin(yawPitch.yaw);
+ const cp=Math.cos(yawPitch.pitch),sp=Math.sin(yawPitch.pitch);
+ const distance=9;
+ cameraTarget.set(self.x+sy*cp*distance,1.55+sp*distance+2.0,self.z+cy*cp*distance);
+ camera.position.lerp(cameraTarget,1-Math.exp(-9*dt));
+ camera.lookAt(self.x,1.4,self.z);
  if(now-lastSent>=100){socket.emit('move',{x:self.x,y:height,z:self.z});lastSent=now;}
- if(stage===2 && gameId)ui.panel.hidden=Math.hypot(self.x,self.z+5)>2.5;
+ if(stage===2 && gameId)ui.panel.hidden=Math.hypot(self.x,self.z+5)>2.5&&!codeMode;
  renderer.render(scene,camera);
 }
-makeWorld();renderUI();requestAnimationFrame(frame);
+makeWorld();renderUI();if(pcMode)mouseTip.hidden=false;requestAnimationFrame(frame);
 window.addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight);});
