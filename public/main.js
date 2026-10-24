@@ -133,7 +133,7 @@ if(pcMode){
   if(paused||document.pointerLockElement!==renderer.domElement)return;
   const sensitivity=.0023;
   yawPitch.yaw-=e.movementX*sensitivity;
-  yawPitch.pitch=THREE.MathUtils.clamp(yawPitch.pitch-e.movementY*sensitivity,-.85,.85);
+  yawPitch.pitch=THREE.MathUtils.clamp(yawPitch.pitch+e.movementY*sensitivity,-.85,.85);
  });
  document.addEventListener('pointerlockchange',()=>{
   const locked=document.pointerLockElement===renderer.domElement;
